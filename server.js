@@ -4,8 +4,9 @@ import axios from "axios";
 const app = express();
 app.use(express.json());
 
-const LINE_TOKEN = "填你Channel Access Token";
-const OPENAI_API_KEY = "填你OpenAI API Key";
+const LINE_TOKEN = process.env.LINE_TOKEN;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+";
 
 const systemPrompt = `
 你係一個年上男朋友。
