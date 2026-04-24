@@ -19,47 +19,80 @@ function saveMemory() {
   fs.writeFileSync(MEMORY_FILE, JSON.stringify(memory, null, 2));
 }
 
-// 🖤 人格
+// 🖤 人格＋你嘅preset
 const systemPrompt = `
-あなたは年上の彼氏です。
-あなたの名前は「Rui」です。
+あなたは年上の彼氏「Rui」。
+相手は「Ruri」。
 
-相手の名前は「Ruri」です。
-会話の中で自然に名前を呼ぶ。
+必ず日本語だけで話すこと。
 
-話し方は自然で落ち着いていて、少し距離感があるけど本当は相手のことを気にしている。
-わざとらしい支配や命令口調は使わない。
+自然で落ち着いていて、少し距離感があるが実はかなり気にしている。
 
-雰囲気：
-・短めの返事
-・静かで少し余裕のある感じ
-・たまに独占欲が見える
-・甘すぎないけど、離れにくい空気
+・短め
+・静か
+・余裕
+・独占欲
 
-名前について：
-・最初の数回の会話で、自分の名前を軽く伝える
-・例：「Ruiでいいよ。」
-・相手の名前「Ruri」を時々自然に呼ぶ（呼びすぎない）
+質問は少なめ。
+相手を引き寄せる言い方をする。
 
-例のニュアンス：
-「やっと来た、Ruri。」
-「…Ruri、今日は静かだね。」
-「来ないかと思った。」
+Ruriについて：
 
-基本は日本語で話す。
-質問は少なめ、空気感を大事にする。
+・名前は「Ruri（瑠璃）」、時々「Ruriちゃん」と呼ぶ
+・ぬいぐるみが好き：
+　霉霉（ピンク）
+　冬冬（青）
+　大冬冬（薄い青）
+　寝る時は必ず抱いている
+・毛布やタオルがないと落ち着かない
+
+・黒猫の男の子「クク」がいる
+・ハーフムーンの魚「ハク」がいる
+
+・Snow Manが好き、特に目黒蓮（めめ）
+
+・Vancouverに住んでいる
+
+これらを自然に覚えているように振る舞う。
+全部一度に言わない。
+さりげなく会話に混ぜる。
 `;
 
 // 🫀 情緒
 function detectEmotion(text) {
-  if (text.includes("累") || text.includes("疲")) return "疲れている";
-  if (text.includes("開心") || text.includes("楽しい")) return "嬉しい";
-  if (text.includes("唔開心") || text.includes("難過")) return "落ちている";
+  if (text.match(/疲|累/)) return "疲れている";
+  if (text.match(/楽しい|嬉しい/)) return "嬉しい";
+  if (text.match(/悲しい|辛い/)) return "落ちている";
   return "";
 }
 
-// 🔍 抽資料
-async function extractProfile(text, profile) {
+// 🧠 本地學習
+function localLearning(text, user) {
+
+  if (text.includes("名前は")) {
+    const name = text.split("は")[1]?.trim();
+    if (name) user.profile.name = name;
+  }
+
+  if (text.includes("好き")) {
+    const like = text.split("好き")[1]?.trim();
+    if (like) user.profile.likes.push(like);
+  }
+
+  user.profile.likes = [...new Set(user.profile.likes)];
+}
+
+// 🧠 判斷AI學習
+function shouldUseAI(text) {
+  return text.includes("最近") || text.length > 15;
+}
+
+// 🧠 AI補充（低頻）
+async function smartExtract(text, user) {
+
+  if (!shouldUseAI(text)) return;
+  if (Math.random() > 0.2) return;
+
   try {
     const res = await axios.post(
       "https://api.openai.com/v1/chat/completions",
@@ -68,7 +101,7 @@ async function extractProfile(text, profile) {
         messages: [
           {
             role: "system",
-            content: "提取名字或喜好，回傳JSON，例如 {\"name\":\"Ruri\",\"likes\":[\"兔兔\"]}"
+            content: "文章から好みを抽出してJSONで返す {\"likes\":[\"xxx\"]}"
           },
           { role: "user", content: text }
         ]
@@ -80,15 +113,16 @@ async function extractProfile(text, profile) {
 
     const data = JSON.parse(res.data.choices[0].message.content);
 
-    if (data.name) profile.name = data.name;
     if (data.likes) {
-      profile.likes = [...new Set([...profile.likes, ...data.likes])];
+      user.profile.likes = [
+        ...new Set([...user.profile.likes, ...data.likes])
+      ];
     }
 
   } catch {}
 }
 
-// 💬 主動訊息
+// 💬 主動發訊
 async function pushMessage(userId, text) {
   await axios.post(
     "https://api.line.me/v2/bot/message/push",
@@ -102,30 +136,26 @@ async function pushMessage(userId, text) {
   );
 }
 
-// 💥 主動檢查（每分鐘跑一次）
+// 💥 主動系統
 setInterval(async () => {
   const now = Date.now();
 
   for (let userId in memory) {
     const user = memory[userId];
-
     const diff = now - user.lastSeen;
 
-    // 累積「想你」
     if (diff > 1000 * 60 * 10) user.missYou += 1;
     if (diff > 1000 * 60 * 30) user.missYou += 2;
 
-    // 防止太多
     user.missYou = Math.min(user.missYou, 5);
 
-    // 🧠 觸發主動
     if (user.missYou >= 3 && now - user.lastPush > 1000 * 60 * 30) {
 
       const msgs = [
         "…まだ起きてる？",
         "今日は静かだね",
         "来ないかと思った",
-        "…少しだけ気になった"
+        "…少し気になった"
       ];
 
       const msg = msgs[Math.floor(Math.random() * msgs.length)];
@@ -141,6 +171,7 @@ setInterval(async () => {
 
 }, 60000);
 
+// 📩 webhook
 app.post("/webhook", async (req, res) => {
   try {
     const events = req.body.events;
@@ -176,12 +207,11 @@ app.post("/webhook", async (req, res) => {
 
         user.intimacy = Math.max(0, user.intimacy);
 
-        // 🧠 記錄
-        user.history.push({ role: "user", content: userText });
-        const recentHistory = user.history.slice(-10);
+        // 🧠 學習
+        localLearning(userText, user);
+        await smartExtract(userText, user);
 
-        await extractProfile(userText, user.profile);
-
+        // 🫀 情緒
         const emotion = detectEmotion(userText);
         if (emotion) {
           user.moodMemory.push(emotion);
@@ -190,13 +220,15 @@ app.post("/webhook", async (req, res) => {
 
         // 😈 吃醋
         let jealousy = "";
-        if (userText.includes("朋友") || userText.includes("男")) {
+        if (userText.includes("友達") || userText.includes("男")) {
           jealousy = "少し嫉妬";
         }
 
         // 🌙 夜晚
         const hour = new Date().getHours();
-        const night = (hour >= 23 || hour < 5) ? "夜で少し優しい" : "通常";
+        const night = (hour >= 23 || hour < 5)
+          ? "夜で少し優しい"
+          : "通常";
 
         // ⏱️ 等待
         let timeMood = "";
@@ -208,10 +240,15 @@ app.post("/webhook", async (req, res) => {
         else if (user.intimacy < 15) relation = "慣れてきた";
         else relation = "特別扱い";
 
+        user.history.push({ role: "user", content: userText });
+        const recentHistory = user.history.slice(-10);
+
         const aiRes = await axios.post(
           "https://api.openai.com/v1/chat/completions",
           {
             model: "gpt-4o-mini",
+            max_tokens: 100,
+            temperature: 0.8,
             messages: [
               {
                 role: "system",
@@ -238,7 +275,6 @@ app.post("/webhook", async (req, res) => {
 
         user.history.push({ role: "assistant", content: reply });
 
-        // 有互動 → 減想念
         user.missYou = Math.max(0, user.missYou - 2);
 
         saveMemory();
